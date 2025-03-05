@@ -2,6 +2,9 @@ using System;
 using System.IO;
 using System.Diagnostics;
 using Gtk;
+using System.Text;
+using System.Linq;
+using System.Collections.Generic;
 using AutoGestPro.src.Models;
 using AutoGestPro.src.DataStructures;
 using AutoGestPro.src.UI.Common;  // Assuming you created the shared MessageEventArgs
@@ -126,15 +129,15 @@ namespace AutoGestPro.src.UI.Views
                         break;
 
                     case "Bitácora":
-                        //dotContent = GenerateBitacoraReport();
+                        dotContent = logMatrix.GenerateDot();
                         break;
 
                     case "Top 5 vehículos con más servicios":
-                        //dotContent = GenerateTopVehiclesWithMostServices();
+                        dotContent = GenerateTopVehiclesWithMostServices();
                         break;
 
                     case "Top 5 vehículos más antiguos":
-                        //dotContent = GenerateOldestVehicles();
+                        dotContent = GenerateOldestVehicles();
                         break;
                 }
 
@@ -243,7 +246,193 @@ namespace AutoGestPro.src.UI.Views
             }
         }
 
+        // Generate report for the top 5 vehicles with most services
+        private string GenerateTopVehiclesWithMostServices()
+        {
+            try
+            {
+                Dictionary<int, int> vehicleServiceCount = new Dictionary<int, int>();
 
+                // Get all services from the queue
+                Service*[] services = serviceQueue.GetAllServicePointers();
+                if (services == null || services.Length == 0)
+                {
+                    return "digraph { node [shape=box]; \"No hay servicios registrados\" }";
+                }
+
+                // Count services per vehicle
+                foreach (var service in services)
+                {
+                    if (service == null) continue;
+
+                    int vehicleId = service->Id_Vehiculo;
+                    if (vehicleServiceCount.ContainsKey(vehicleId))
+                    {
+                        vehicleServiceCount[vehicleId]++;
+                    }
+                    else
+                    {
+                        vehicleServiceCount[vehicleId] = 1;
+                    }
+                }
+
+                // Get top 5 vehicles with most services
+                var topVehicles = vehicleServiceCount
+                    .OrderByDescending(kv => kv.Value)
+                    .Take(5)
+                    .ToArray();
+
+                if (topVehicles.Length == 0)
+                {
+                    return "digraph { node [shape=box]; \"No hay datos para generar el reporte\" }";
+                }
+
+                // Generate DOT content
+                StringBuilder dot = new StringBuilder();
+                dot.AppendLine("digraph TopVehicles {");
+                dot.AppendLine("  rankdir=TB;");
+                dot.AppendLine("  node [shape=record, style=filled, fillcolor=lightblue];");
+                dot.AppendLine("  graph [fontsize=20 labelloc=\"t\" label=\"Top 5 Vehículos con Más Servicios\"];");
+
+                // Add a header node
+                dot.AppendLine("  header [label=\"Top 5 Vehículos con Más Servicios\", shape=plaintext];");
+
+                // Create nodes for each vehicle
+                for (int i = 0; i < topVehicles.Length; i++)
+                {
+                    int vehicleId = topVehicles[i].Key;
+                    int serviceCount = topVehicles[i].Value;
+
+                    // Try to get vehicle information
+                    Vehicle* vehicle = vehicleList.Search(vehicleId);
+                    string vehicleInfo = "Información no disponible";
+
+                    if (vehicle != null)
+                    {
+                        vehicleInfo = $"ID: {vehicleId}\\nPlaca: {new string(vehicle->Placa)}\\nMarca: {new string(vehicle->Marca)}\\nModelo: {new string(vehicle->Modelo)}";
+                    }
+
+                    dot.AppendLine($"  vehicle{i} [label=\"{vehicleInfo}\\nTotal Servicios: {serviceCount}\"];");
+
+                    // Add rank to maintain order
+                    if (i > 0)
+                    {
+                        dot.AppendLine($"  vehicle{i - 1} -> vehicle{i} [weight=1];");
+                    }
+                    else
+                    {
+                        dot.AppendLine($"  header -> vehicle{i} [weight=1];");
+                    }
+                }
+
+                dot.AppendLine("}");
+                return dot.ToString();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating top vehicles report: {ex.Message}");
+                return "digraph { node [shape=box]; \"Error al generar reporte: " + ex.Message.Replace("\"", "\\\"") + "\" }";
+            }
+        }
+
+        // Generate report for the top 5 oldest vehicles
+        private string GenerateOldestVehicles()
+        {
+            try
+            {
+                // Get all vehicles
+                Vehicle*[] vehicles = vehicleList.GetVehicles();
+                if (vehicles == null || vehicles.Length == 0)
+                {
+                    return "digraph { node [shape=box]; \"No hay vehículos registrados\" }";
+                }
+
+                // Filter out null vehicles and create a new array
+                int validCount = 0;
+                foreach (Vehicle* v in vehicles)
+                {
+                    if (v != null) validCount++;
+                }
+
+                Vehicle*[] filteredVehicles = new Vehicle*[validCount];
+                int index = 0;
+                foreach (Vehicle* v in vehicles)
+                {
+                    if (v != null)
+                    {
+                        filteredVehicles[index++] = v;
+                    }
+                }
+
+                // Sort by ID (bubble sort as a simple example)
+                for (int i = 0; i < filteredVehicles.Length - 1; i++)
+                {
+                    for (int j = 0; j < filteredVehicles.Length - i - 1; j++)
+                    {
+                        if (filteredVehicles[j]->ID > filteredVehicles[j + 1]->ID)
+                        {
+                            // Swap
+                            Vehicle* temp = filteredVehicles[j];
+                            filteredVehicles[j] = filteredVehicles[j + 1];
+                            filteredVehicles[j + 1] = temp;
+                        }
+                    }
+                }
+
+                // Take top 5 (or fewer if there aren't 5)
+                int takeCount = Math.Min(5, filteredVehicles.Length);
+                Vehicle*[] oldestVehicles = new Vehicle*[takeCount];
+                for (int i = 0; i < takeCount; i++)
+                {
+                    oldestVehicles[i] = filteredVehicles[i];
+                }
+
+                if (oldestVehicles.Length == 0)
+                {
+                    return "digraph { node [shape=box]; \"No hay datos para generar el reporte\" }";
+                }
+
+                // Generate DOT content - This part remains the same
+                StringBuilder dot = new StringBuilder();
+                dot.AppendLine("digraph OldestVehicles {");
+                dot.AppendLine("  rankdir=TB;");
+                dot.AppendLine("  node [shape=record, style=filled, fillcolor=lightblue];");
+                dot.AppendLine("  graph [fontsize=20 labelloc=\"t\" label=\"Top 5 Vehículos Más Antiguos\"];");
+
+                // Add a header node
+                dot.AppendLine("  header [label=\"Top 5 Vehículos Más Antiguos\", shape=plaintext];");
+
+                // Create nodes for each vehicle
+                for (int i = 0; i < oldestVehicles.Length; i++)
+                {
+                    Vehicle* vehicle = oldestVehicles[i];
+
+                    string placa = new string(vehicle->Placa);
+                    string marca = new string(vehicle->Marca);
+                    string modelo = new string(vehicle->Modelo);
+
+                    dot.AppendLine($"  vehicle{i} [label=\"ID: {vehicle->ID}\\nPlaca: {placa}\\nMarca: {marca}\\nModelo: {modelo}\"];");
+
+                    // Add rank to maintain order
+                    if (i > 0)
+                    {
+                        dot.AppendLine($"  vehicle{i - 1} -> vehicle{i} [weight=1];");
+                    }
+                    else
+                    {
+                        dot.AppendLine($"  header -> vehicle{i} [weight=1];");
+                    }
+                }
+
+                dot.AppendLine("}");
+                return dot.ToString();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating oldest vehicles report: {ex.Message}");
+                return "digraph { node [shape=box]; \"Error al generar reporte: " + ex.Message.Replace("\"", "\\\"") + "\" }";
+            }
+        }
 
         private bool IsGraphvizInstalled()
         {
