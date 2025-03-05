@@ -1,0 +1,1471 @@
+using System;
+using System.IO;
+using Gtk;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System.Collections.Generic;
+using System.Diagnostics;
+using AutoGestPro.src.Models;
+using AutoGestPro.src.DataStructures;
+using AutoGestPro.src.UI.Components;
+using AutoGestPro.src.Utils;
+
+
+namespace AutoGestPro.src.UI.Windows
+{
+    public unsafe class MainWindown : Window
+    {
+        // Data structures
+        private readonly UserList userList;
+        private readonly VehicleList vehicleList;
+        private readonly SparePartsList sparePartsList;
+        private readonly ServiceQueue serviceQueue;
+        private readonly InvoiceStack invoiceStack;
+        private readonly SparseMatrix logMatrix;
+
+        // UI components
+        private readonly HeaderBar headerBar;
+        private readonly Stack mainStack;
+        private readonly Sidebar sidebar;
+
+        // Bulk load components
+        private ComboBoxText cmbTipoEntidad;
+        private Button btnSeleccionarArchivo;
+        private Button btnCargarDatos;
+        private Label lblEstadoCarga;
+        private ScrolledWindow swVistaPrevia;
+        private TextView txtVistaPrevia;
+
+        // Componentes para gestión de usuarios
+        private Entry txtBuscarUsuarioId;
+        private Button btnBuscarUsuario;
+        private Entry txtNombres;
+        private Entry txtApellidos;
+        private Entry txtCorreo;
+        private Entry txtContrasenia;
+        private Button btnGuardarUsuario;
+        private Button btnEditarUsuario;
+        private Button btnEliminarUsuario;
+        private TreeView trvUsuarios;
+        private ListStore lsUsuarios;
+
+        // Componentes para gestión de vehículos
+        private ComboBoxText cmbUsuarioVehiculo;
+        private Entry txtMarca;
+        private Entry txtModelo;
+        private Entry txtPlaca;
+        private Button btnGuardarVehiculo;
+        private TreeView trvVehiculos;
+        private ListStore lsVehiculos;
+
+        // Componentes para gestión de repuestos
+        private Entry txtNombreRepuesto;
+        private Entry txtDetallesRepuesto;
+        private Entry txtCostoRepuesto;
+        private Button btnGuardarRepuesto;
+        private TreeView trvRepuestos;
+        private ListStore lsRepuestos;
+
+        // Componentes para servicios y facturas
+        private ComboBoxText cmbVehiculoServicio;
+        private ComboBoxText cmbRepuestoServicio;
+        private Entry txtDetallesServicio;
+        private Entry txtCostoServicio;
+        private Button btnGenerarServicio;
+        private TreeView trvServicios;
+        private ListStore lsServicios;
+        private Button btnCancelarFactura;
+        private TreeView trvFacturas;
+        private ListStore lsFacturas;
+
+        // Componentes para reportes
+        private ComboBoxText cmbTipoReporte;
+        private Button btnGenerarReporte;
+        private Image imgReporte;
+
+        private string rutaArchivoSeleccionado;
+        private int siguienteIdUsuario = 1;
+        private int siguienteIdVehiculo = 1;
+        private int siguienteIdRepuesto = 1;
+        private int siguienteIdServicio = 1;
+        private int siguienteIdFactura = 1;
+
+        public MainWindown() : base("AutoGest Pro - Sistema de Gestión para Talleres")
+        {
+            // Inicializar estructuras de datos
+            userList = new UserList();
+            vehicleList = new VehicleList();
+            sparePartsList = new SparePartsList();
+            serviceQueue = new ServiceQueue();
+            invoiceStack = new InvoiceStack();
+            logMatrix = new SparseMatrix();
+
+
+
+            // Configurar ventana principal
+            SetDefaultSize(800, 600);
+            WindowPosition = WindowPosition.Center;
+            Resizable = true;
+
+            // Crear barra de encabezado moderna
+            headerBar = new HeaderBar
+            {
+                ShowCloseButton = true,
+                Title = "AutoGest Pro",
+                Subtitle = "Sistema de Gestión para Talleres"
+            };
+            Titlebar = headerBar;
+
+            // Configurar layout principal
+            Box mainBox = new(Orientation.Horizontal, 0);
+            Add(mainBox);
+
+            // Crear sidebar
+            sidebar = [];
+            mainBox.PackStart(sidebar, false, false, 0);
+
+            // Panel principal con stack para navegación
+            mainStack = new Stack
+            {
+                TransitionType = StackTransitionType.SlideLeftRight
+            };
+
+            // Crear páginas del stack
+            mainStack.AddTitled(CreateDashboardPage(), "dashboard", "Dashboard");
+            mainStack.AddTitled(CreateCargaMasivaPage(), "carga_masiva", "Carga Masiva");
+            mainStack.AddTitled(CreateGestionUsuariosPage(), "usuarios", "Usuarios");
+            mainStack.AddTitled(CreateGestionVehiculosPage(), "vehiculos", "Vehículos");
+            mainStack.AddTitled(CreateGestionRepuestosPage(), "repuestos", "Repuestos");
+            mainStack.AddTitled(CreateServiciosPage(), "servicios", "Servicios");
+            mainStack.AddTitled(CreateFacturasPage(), "facturas", "Facturas");
+            mainStack.AddTitled(CreateReportesPage(), "reportes", "Reportes");
+
+            // Agregar stack a contenedor principal
+            Box contentBox = new(Orientation.Vertical, 0);
+            contentBox.PackStart(mainStack, true, true, 0);
+
+            mainBox.PackStart(contentBox, true, true, 0);
+
+            // Configurar eventos de navegación
+            sidebar.SidebarItemSelected += (sender, args) =>
+            {
+                mainStack.VisibleChildName = args.ItemName;
+            };
+
+            // Mostrar elementos
+            ShowAll();
+
+            // Conectar señales de cierre
+            DeleteEvent += (o, args) =>
+            {
+                Application.Quit();
+                args.RetVal = true;
+            };
+        }
+
+        #region Páginas de la interfaz
+
+        private Box CreateDashboardPage()
+        {
+            Box box = new(Orientation.Vertical, 10)
+            {
+                Margin = 20
+            };
+
+            // Encabezado
+            Label lblBienvenida = new()
+            {
+                Markup = "<span font='20'>Bienvenido a AutoGest Pro</span>"
+            };
+            box.PackStart(lblBienvenida, false, false, 10);
+
+            Label lblDescripcion = new("Sistema integral de gestión para talleres de reparación de vehículos");
+            box.PackStart(lblDescripcion, false, false, 5);
+
+            // Tarjetas de estadísticas
+            Box cardsBox = new(Orientation.Horizontal, 20)
+            {
+                Homogeneous = false
+            };
+            box.PackStart(cardsBox, false, false, 20);
+
+            // Tarjeta de usuarios
+            Frame cardUsuarios = CreateStatCard("Usuarios", "0", "user-info-symbolic");
+            cardsBox.PackStart(cardUsuarios, true, true, 0);
+
+            // Tarjeta de vehículos
+            Frame cardVehiculos = CreateStatCard("Vehículos", "0", "transportation-symbolic");
+            cardsBox.PackStart(cardVehiculos, true, true, 0);
+
+            // Tarjeta de repuestos
+            Frame cardRepuestos = CreateStatCard("Repuestos", "0", "emblem-system-symbolic");
+            cardsBox.PackStart(cardRepuestos, true, true, 0);
+
+            // Tarjeta de servicios
+            Frame cardServicios = CreateStatCard("Servicios", "0", "preferences-system-symbolic");
+            cardsBox.PackStart(cardServicios, true, true, 0);
+
+            // Acciones rápidas
+            Label lblAcciones = new Label();
+            lblAcciones.Markup = "<span font='16'>Acciones rápidas</span>";
+            lblAcciones.Halign = Align.Start;
+            box.PackStart(lblAcciones, false, false, 10);
+
+            Box actionsBox = new Box(Orientation.Horizontal, 10);
+            box.PackStart(actionsBox, false, false, 10);
+
+            Button btnNuevoUsuario = CreateActionButton("Nuevo Usuario", "list-add-symbolic");
+            btnNuevoUsuario.Clicked += (sender, e) =>
+            {
+                mainStack.VisibleChildName = "usuarios";
+            };
+            actionsBox.PackStart(btnNuevoUsuario, false, false, 0);
+
+            Button btnNuevoVehiculo = CreateActionButton("Nuevo Vehículo", "list-add-symbolic");
+            btnNuevoVehiculo.Clicked += (sender, e) =>
+            {
+                mainStack.VisibleChildName = "vehiculos";
+            };
+            actionsBox.PackStart(btnNuevoVehiculo, false, false, 0);
+
+            Button btnNuevoServicio = CreateActionButton("Nuevo Servicio", "list-add-symbolic");
+            btnNuevoServicio.Clicked += (sender, e) =>
+            {
+                mainStack.VisibleChildName = "servicios";
+            };
+            actionsBox.PackStart(btnNuevoServicio, false, false, 0);
+
+            Button btnVerReportes = CreateActionButton("Ver Reportes", "document-properties-symbolic");
+            btnVerReportes.Clicked += (sender, e) =>
+            {
+                mainStack.VisibleChildName = "reportes";
+            };
+            actionsBox.PackStart(btnVerReportes, false, false, 0);
+
+            return box;
+        }
+
+        private Box CreateCargaMasivaPage()
+        {
+            Box box = new(Orientation.Vertical, 15)
+            {
+                Margin = 20
+            };
+
+            // Título
+            Label lblTitulo = new()
+            {
+                Markup = "<span font='18'>Carga Masiva de Datos</span>",
+                Halign = Align.Start
+            };
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Selección de tipo de entidad
+            Box seleccionBox = new(Orientation.Horizontal, 10);
+            box.PackStart(seleccionBox, false, false, 10);
+
+            Label lblTipo = new("Tipo de entidad:");
+            seleccionBox.PackStart(lblTipo, false, false, 0);
+
+            cmbTipoEntidad = new ComboBoxText();
+            cmbTipoEntidad.AppendText("Usuarios");
+            cmbTipoEntidad.AppendText("Vehículos");
+            cmbTipoEntidad.AppendText("Repuestos");
+            cmbTipoEntidad.Active = 0;
+            seleccionBox.PackStart(cmbTipoEntidad, false, false, 0);
+
+            btnSeleccionarArchivo = new Button("Seleccionar archivo JSON");
+            btnSeleccionarArchivo.Clicked += SeleccionarArchivo_Clicked;
+            seleccionBox.PackStart(btnSeleccionarArchivo, false, false, 10);
+
+            lblEstadoCarga = new Label("Ningún archivo seleccionado");
+            seleccionBox.PackStart(lblEstadoCarga, false, false, 0);
+
+            // Vista previa del archivo
+            Frame frameVistaPrevia = new("Vista previa del archivo JSON");
+            box.PackStart(frameVistaPrevia, true, true, 0);
+
+            swVistaPrevia = new ScrolledWindow();
+            swVistaPrevia.ShadowType = ShadowType.EtchedIn;
+
+            txtVistaPrevia = new TextView();
+            txtVistaPrevia.Editable = false;
+            txtVistaPrevia.WrapMode = WrapMode.Word;
+            swVistaPrevia.Add(txtVistaPrevia);
+
+            frameVistaPrevia.Add(swVistaPrevia);
+
+            // Botón de carga
+            Box accionesBox = new Box(Orientation.Horizontal, 0);
+            accionesBox.Halign = Align.End;
+            box.PackStart(accionesBox, false, false, 10);
+
+            btnCargarDatos = new Button("Cargar datos");
+            btnCargarDatos.StyleContext.AddClass("suggested-action");
+            btnCargarDatos.Sensitive = false;
+            btnCargarDatos.Clicked += CargarDatos_Clicked;
+            accionesBox.PackStart(btnCargarDatos, false, false, 0);
+
+            return box;
+        }
+
+        private Widget CreateGestionUsuariosPage()
+        {
+            Box box = new Box(Orientation.Vertical, 15);
+            box.Margin = 20;
+
+            // Título
+            Label lblTitulo = new Label();
+            lblTitulo.Markup = "<span font='18'>Gestión de Usuarios</span>";
+            lblTitulo.Halign = Align.Start;
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Panel de formulario y lista
+            Box panelBox = new Box(Orientation.Horizontal, 20);
+            box.PackStart(panelBox, true, true, 0);
+
+            // Formulario de usuario
+            Box formBox = new Box(Orientation.Vertical, 10);
+            panelBox.PackStart(formBox, false, false, 0);
+
+            Frame formFrame = new Frame("Datos del Usuario");
+            formBox.PackStart(formFrame, false, false, 0);
+
+            Box formInnerBox = new Box(Orientation.Vertical, 10);
+            formInnerBox.Margin = 15;
+            formFrame.Add(formInnerBox);
+
+            // Búsqueda por ID
+            Box busquedaBox = new Box(Orientation.Horizontal, 5);
+            formInnerBox.PackStart(busquedaBox, false, false, 0);
+
+            Label lblBuscarId = new Label("ID del Usuario:");
+            busquedaBox.PackStart(lblBuscarId, false, false, 0);
+
+            txtBuscarUsuarioId = new Entry();
+            txtBuscarUsuarioId.PlaceholderText = "Buscar por ID";
+            txtBuscarUsuarioId.WidthChars = 10;
+            busquedaBox.PackStart(txtBuscarUsuarioId, true, true, 0);
+
+            btnBuscarUsuario = new Button("Buscar");
+            btnBuscarUsuario.Clicked += BuscarUsuario_Clicked;
+            busquedaBox.PackStart(btnBuscarUsuario, false, false, 0);
+
+            // Campos del formulario
+            Grid formGrid = new Grid();
+            formGrid.RowSpacing = 10;
+            formGrid.ColumnSpacing = 10;
+            formInnerBox.PackStart(formGrid, false, false, 10);
+
+            Label lblNombres = new Label("Nombres:");
+            lblNombres.Halign = Align.Start;
+            formGrid.Attach(lblNombres, 0, 0, 1, 1);
+
+            txtNombres = new Entry();
+            txtNombres.PlaceholderText = "Ingrese nombres";
+            formGrid.Attach(txtNombres, 1, 0, 1, 1);
+
+            Label lblApellidos = new Label("Apellidos:");
+            lblApellidos.Halign = Align.Start;
+            formGrid.Attach(lblApellidos, 0, 1, 1, 1);
+
+            txtApellidos = new Entry();
+            txtApellidos.PlaceholderText = "Ingrese apellidos";
+            formGrid.Attach(txtApellidos, 1, 1, 1, 1);
+
+            Label lblCorreo = new Label("Correo:");
+            lblCorreo.Halign = Align.Start;
+            formGrid.Attach(lblCorreo, 0, 2, 1, 1);
+
+            txtCorreo = new Entry();
+            txtCorreo.PlaceholderText = "ejemplo@mail.com";
+            formGrid.Attach(txtCorreo, 1, 2, 1, 1);
+
+            Label lblContrasenia = new Label("Contraseña:");
+            lblContrasenia.Halign = Align.Start;
+            formGrid.Attach(lblContrasenia, 0, 3, 1, 1);
+
+            txtContrasenia = new Entry();
+            txtContrasenia.PlaceholderText = "Contraseña";
+            txtContrasenia.Visibility = false;
+            formGrid.Attach(txtContrasenia, 1, 3, 1, 1);
+
+            // Botones de acción
+            Box botonesBox = new Box(Orientation.Horizontal, 10);
+            botonesBox.Homogeneous = true;
+            formInnerBox.PackStart(botonesBox, false, false, 10);
+
+            btnGuardarUsuario = new Button("Guardar Nuevo");
+            btnGuardarUsuario.StyleContext.AddClass("suggested-action");
+            btnGuardarUsuario.Clicked += GuardarUsuario_Clicked;
+            botonesBox.PackStart(btnGuardarUsuario, true, true, 0);
+
+            btnEditarUsuario = new Button("Actualizar");
+            btnEditarUsuario.Clicked += EditarUsuario_Clicked;
+            botonesBox.PackStart(btnEditarUsuario, true, true, 0);
+
+            btnEliminarUsuario = new Button("Eliminar");
+            btnEliminarUsuario.StyleContext.AddClass("destructive-action");
+            btnEliminarUsuario.Clicked += EliminarUsuario_Clicked;
+            botonesBox.PackStart(btnEliminarUsuario, true, true, 0);
+
+            // Lista de usuarios
+            Frame listaFrame = new Frame("Lista de Usuarios");
+            panelBox.PackStart(listaFrame, true, true, 0);
+
+            Box listaBox = new Box(Orientation.Vertical, 10);
+            listaBox.Margin = 15;
+            listaFrame.Add(listaBox);
+
+            ScrolledWindow sw = new ScrolledWindow();
+            sw.ShadowType = ShadowType.EtchedIn;
+            sw.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            listaBox.PackStart(sw, true, true, 0);
+
+            // TreeView para usuarios
+            lsUsuarios = new ListStore(typeof(string), typeof(string), typeof(string), typeof(string), typeof(string));
+            trvUsuarios = new TreeView(lsUsuarios);
+            trvUsuarios.HeadersVisible = true;
+
+            trvUsuarios.AppendColumn("ID", new CellRendererText(), "text", 0);
+            trvUsuarios.AppendColumn("Nombres", new CellRendererText(), "text", 1);
+            trvUsuarios.AppendColumn("Apellidos", new CellRendererText(), "text", 2);
+            trvUsuarios.AppendColumn("Correo", new CellRendererText(), "text", 3);
+
+            // Selección en el TreeView
+            trvUsuarios.Selection.Changed += (sender, e) =>
+            {
+                if (trvUsuarios.Selection.GetSelected(out TreeIter iter))
+                {
+                    txtBuscarUsuarioId.Text = (string)lsUsuarios.GetValue(iter, 0);
+                    txtNombres.Text = (string)lsUsuarios.GetValue(iter, 1);
+                    txtApellidos.Text = (string)lsUsuarios.GetValue(iter, 2);
+                    txtCorreo.Text = (string)lsUsuarios.GetValue(iter, 3);
+                    txtContrasenia.Text = (string)lsUsuarios.GetValue(iter, 4);
+                }
+            };
+
+            sw.Add(trvUsuarios);
+
+            // Cargar datos iniciales
+            CargarDatosUsuarios();
+
+            return box;
+        }
+
+        private Widget CreateGestionVehiculosPage()
+        {
+            Box box = new Box(Orientation.Vertical, 15);
+            box.Margin = 20;
+
+            // Título
+            Label lblTitulo = new Label();
+            lblTitulo.Markup = "<span font='18'>Gestión de Vehículos</span>";
+            lblTitulo.Halign = Align.Start;
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Panel de formulario y lista
+            Box panelBox = new Box(Orientation.Horizontal, 20);
+            box.PackStart(panelBox, true, true, 0);
+
+            // Formulario de vehículo
+            Box formBox = new Box(Orientation.Vertical, 10);
+            panelBox.PackStart(formBox, false, false, 0);
+
+            Frame formFrame = new Frame("Datos del Vehículo");
+            formBox.PackStart(formFrame, false, false, 0);
+
+            Box formInnerBox = new Box(Orientation.Vertical, 10);
+            formInnerBox.Margin = 15;
+            formFrame.Add(formInnerBox);
+
+            // Campos del formulario
+            Grid formGrid = new Grid();
+            formGrid.RowSpacing = 10;
+            formGrid.ColumnSpacing = 10;
+            formInnerBox.PackStart(formGrid, false, false, 10);
+
+            Label lblUsuario = new Label("Propietario:");
+            lblUsuario.Halign = Align.Start;
+            formGrid.Attach(lblUsuario, 0, 0, 1, 1);
+
+            cmbUsuarioVehiculo = new ComboBoxText();
+            formGrid.Attach(cmbUsuarioVehiculo, 1, 0, 1, 1);
+
+            Label lblMarca = new Label("Marca:");
+            lblMarca.Halign = Align.Start;
+            formGrid.Attach(lblMarca, 0, 1, 1, 1);
+
+            txtMarca = new Entry();
+            txtMarca.PlaceholderText = "Ej: Toyota";
+            formGrid.Attach(txtMarca, 1, 1, 1, 1);
+
+            Label lblModelo = new Label("Modelo:");
+            lblModelo.Halign = Align.Start;
+            formGrid.Attach(lblModelo, 0, 2, 1, 1);
+
+            txtModelo = new Entry();
+            txtModelo.PlaceholderText = "Ej: Corolla";
+            formGrid.Attach(txtModelo, 1, 2, 1, 1);
+
+            Label lblPlaca = new Label("Placa:");
+            lblPlaca.Halign = Align.Start;
+            formGrid.Attach(lblPlaca, 0, 3, 1, 1);
+
+            txtPlaca = new Entry();
+            txtPlaca.PlaceholderText = "Ej: ABC123";
+            formGrid.Attach(txtPlaca, 1, 3, 1, 1);
+
+            // Botón guardar
+            btnGuardarVehiculo = new Button("Guardar Vehículo");
+            btnGuardarVehiculo.StyleContext.AddClass("suggested-action");
+            btnGuardarVehiculo.Clicked += GuardarVehiculo_Clicked;
+            formInnerBox.PackStart(btnGuardarVehiculo, false, false, 10);
+
+            // Lista de vehículos
+            Frame listaFrame = new Frame("Lista de Vehículos");
+            panelBox.PackStart(listaFrame, true, true, 0);
+
+            Box listaBox = new Box(Orientation.Vertical, 10);
+            listaBox.Margin = 15;
+            listaFrame.Add(listaBox);
+
+            ScrolledWindow sw = new ScrolledWindow();
+            sw.ShadowType = ShadowType.EtchedIn;
+            sw.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            listaBox.PackStart(sw, true, true, 0);
+
+            // TreeView para vehículos
+            lsVehiculos = new ListStore(typeof(string), typeof(string), typeof(string), typeof(string), typeof(string));
+            trvVehiculos = new TreeView(lsVehiculos);
+            trvVehiculos.HeadersVisible = true;
+
+            trvVehiculos.AppendColumn("ID", new CellRendererText(), "text", 0);
+            trvVehiculos.AppendColumn("Propietario", new CellRendererText(), "text", 1);
+            trvVehiculos.AppendColumn("Marca", new CellRendererText(), "text", 2);
+            trvVehiculos.AppendColumn("Modelo", new CellRendererText(), "text", 3);
+            trvVehiculos.AppendColumn("Placa", new CellRendererText(), "text", 4);
+
+            sw.Add(trvVehiculos);
+
+            // Cargar datos iniciales
+            CargarUsuariosComboBox();
+
+            return box;
+        }
+
+        private Widget CreateGestionRepuestosPage()
+        {
+            Box box = new Box(Orientation.Vertical, 15);
+            box.Margin = 20;
+
+            // Título
+            Label lblTitulo = new Label();
+            lblTitulo.Markup = "<span font='18'>Gestión de Repuestos</span>";
+            lblTitulo.Halign = Align.Start;
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Panel de formulario y lista
+            Box panelBox = new Box(Orientation.Horizontal, 20);
+            box.PackStart(panelBox, true, true, 0);
+
+            // Formulario de repuesto
+            Box formBox = new Box(Orientation.Vertical, 10);
+            panelBox.PackStart(formBox, false, false, 0);
+
+            Frame formFrame = new Frame("Datos del Repuesto");
+            formBox.PackStart(formFrame, false, false, 0);
+
+            Box formInnerBox = new Box(Orientation.Vertical, 10);
+            formInnerBox.Margin = 15;
+            formFrame.Add(formInnerBox);
+
+            // Campos del formulario
+            Grid formGrid = new Grid();
+            formGrid.RowSpacing = 10;
+            formGrid.ColumnSpacing = 10;
+            formInnerBox.PackStart(formGrid, false, false, 10);
+
+            Label lblNombre = new Label("Nombre:");
+            lblNombre.Halign = Align.Start;
+            formGrid.Attach(lblNombre, 0, 0, 1, 1);
+
+            txtNombreRepuesto = new Entry();
+            txtNombreRepuesto.PlaceholderText = "Ej: Filtro de aceite";
+            formGrid.Attach(txtNombreRepuesto, 1, 0, 1, 1);
+
+            Label lblDetalles = new Label("Detalles:");
+            lblDetalles.Halign = Align.Start;
+            formGrid.Attach(lblDetalles, 0, 1, 1, 1);
+
+            txtDetallesRepuesto = new Entry();
+            txtDetallesRepuesto.PlaceholderText = "Descripción del repuesto";
+            formGrid.Attach(txtDetallesRepuesto, 1, 1, 1, 1);
+
+            Label lblCosto = new Label("Costo ($):");
+            lblCosto.Halign = Align.Start;
+            formGrid.Attach(lblCosto, 0, 2, 1, 1);
+
+            txtCostoRepuesto = new Entry();
+            txtCostoRepuesto.PlaceholderText = "Ej: 25.50";
+            formGrid.Attach(txtCostoRepuesto, 1, 2, 1, 1);
+
+            // Botón guardar
+            btnGuardarRepuesto = new Button("Guardar Repuesto");
+            btnGuardarRepuesto.StyleContext.AddClass("suggested-action");
+            btnGuardarRepuesto.Clicked += GuardarRepuesto_Clicked;
+            formInnerBox.PackStart(btnGuardarRepuesto, false, false, 10);
+
+            // Lista de repuestos
+            Frame listaFrame = new Frame("Lista de Repuestos");
+            panelBox.PackStart(listaFrame, true, true, 0);
+
+            Box listaBox = new Box(Orientation.Vertical, 10);
+            listaBox.Margin = 15;
+            listaFrame.Add(listaBox);
+
+            ScrolledWindow sw = new ScrolledWindow();
+            sw.ShadowType = ShadowType.EtchedIn;
+            sw.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            listaBox.PackStart(sw, true, true, 0);
+
+            // TreeView para repuestos
+            lsRepuestos = new ListStore(typeof(string), typeof(string), typeof(string), typeof(string));
+            trvRepuestos = new TreeView(lsRepuestos);
+            trvRepuestos.HeadersVisible = true;
+
+            trvRepuestos.AppendColumn("ID", new CellRendererText(), "text", 0);
+            trvRepuestos.AppendColumn("Nombre", new CellRendererText(), "text", 1);
+            trvRepuestos.AppendColumn("Detalles", new CellRendererText(), "text", 2);
+            trvRepuestos.AppendColumn("Costo", new CellRendererText(), "text", 3);
+
+            sw.Add(trvRepuestos);
+
+            return box;
+        }
+
+        private void GuardarRepuesto_Clicked(object sender, EventArgs e)
+        {
+            try
+            {
+                string nombre = txtNombreRepuesto.Text;
+                string detalles = txtDetallesRepuesto.Text;
+                decimal costo = 0;
+
+                if (string.IsNullOrEmpty(nombre) || string.IsNullOrEmpty(detalles))
+                {
+                    MostrarMensaje("Nombre y detalles son campos obligatorios", MessageType.Error);
+                    return;
+                }
+
+                if (!decimal.TryParse(txtCostoRepuesto.Text, out costo) || costo <= 0)
+                {
+                    MostrarMensaje("Por favor, ingrese un costo válido", MessageType.Error);
+                    return;
+                }
+
+                // Create new spare part
+                int id = siguienteIdRepuesto;
+                // Note: You might need to adjust this to use your actual SparePart model
+                SparePart* nuevaRepuesto = (SparePart*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(SparePart));
+                *nuevaRepuesto = new SparePart(id, nombre, detalles, (double)costo);
+
+                // Add to list
+                sparePartsList.Insert(nuevaRepuesto);
+
+                // Update ListView
+                lsRepuestos.AppendValues(new object[] {
+                    id.ToString(),
+                    nombre,
+                    detalles,
+                    costo.ToString("C")
+                });
+
+                MostrarMensaje("Repuesto registrado exitosamente", MessageType.Info);
+
+                // Clear form fields
+                LimpiarCamposRepuesto();
+
+                // Increment ID for next spare part
+                siguienteIdRepuesto++;
+            }
+            catch (Exception ex)
+            {
+                MostrarMensaje("Error al registrar repuesto: " + ex.Message, MessageType.Error);
+            }
+        }
+
+        private void LimpiarCamposRepuesto()
+        {
+            txtNombreRepuesto.Text = string.Empty;
+            txtDetallesRepuesto.Text = string.Empty;
+            txtCostoRepuesto.Text = string.Empty;
+        }
+        private Box CreateServiciosPage()
+        {
+            Box box = new Box(Orientation.Vertical, 15);
+            box.Margin = 20;
+
+            // Título
+            Label lblTitulo = new Label();
+            lblTitulo.Markup = "<span font='18'>Generación de Servicios</span>";
+            lblTitulo.Halign = Align.Start;
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Panel de formulario y lista
+            Box panelBox = new Box(Orientation.Horizontal, 20);
+            box.PackStart(panelBox, true, true, 0);
+
+            // Formulario de servicio
+            Box formBox = new Box(Orientation.Vertical, 10);
+            panelBox.PackStart(formBox, false, false, 0);
+
+            Frame formFrame = new Frame("Datos del Servicio");
+            formBox.PackStart(formFrame, false, false, 0);
+
+            Box formInnerBox = new Box(Orientation.Vertical, 10);
+            formInnerBox.Margin = 15;
+            formFrame.Add(formInnerBox);
+
+            // Campos del formulario
+            Grid formGrid = new Grid();
+            formGrid.RowSpacing = 10;
+            formGrid.ColumnSpacing = 10;
+            formInnerBox.PackStart(formGrid, false, false, 0);
+
+            Label lblVehiculo = new Label("Vehículo:");
+            lblVehiculo.Halign = Align.Start;
+            formGrid.Attach(lblVehiculo, 0, 0, 1, 1);
+
+            cmbVehiculoServicio = new ComboBoxText();
+            formGrid.Attach(cmbVehiculoServicio, 1, 0, 1, 1);
+
+            Label lblRepuesto = new Label("Repuesto:");
+            lblRepuesto.Halign = Align.Start;
+            formGrid.Attach(lblRepuesto, 0, 1, 1, 1);
+
+            cmbRepuestoServicio = new ComboBoxText();
+            formGrid.Attach(cmbRepuestoServicio, 1, 1, 1, 1);
+
+            Label lblDetalles = new Label("Detalles del servicio:");
+            lblDetalles.Halign = Align.Start;
+            formGrid.Attach(lblDetalles, 0, 2, 1, 1);
+
+            txtDetallesServicio = new Entry();
+            txtDetallesServicio.PlaceholderText = "Describa el servicio";
+            formGrid.Attach(txtDetallesServicio, 1, 2, 1, 1);
+
+            Label lblCosto = new Label("Costo ($):");
+            lblCosto.Halign = Align.Start;
+            formGrid.Attach(lblCosto, 0, 3, 1, 1);
+
+            txtCostoServicio = new Entry();
+            formGrid.Attach(txtCostoServicio, 1, 3, 1, 1);
+
+            // Botón generar servicio
+            btnGenerarServicio = new Button("Generar Servicio");
+            btnGenerarServicio.StyleContext.AddClass("suggested-action");
+            btnGenerarServicio.Clicked += GenerarServicio_Clicked;
+            formInnerBox.PackStart(btnGenerarServicio, false, false, 10);
+
+            // Lista de servicios
+            Frame listaFrame = new Frame("Lista de Servicios Pendientes");
+            panelBox.PackStart(listaFrame, true, true, 0);
+
+            Box listaBox = new Box(Orientation.Vertical, 10);
+            listaBox.Margin = 15;
+            listaFrame.Add(listaBox);
+
+            ScrolledWindow sw = new ScrolledWindow();
+            sw.ShadowType = ShadowType.EtchedIn;
+            sw.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            listaBox.PackStart(sw, true, true, 0);
+
+            // TreeView para servicios
+            lsServicios = new ListStore(typeof(string), typeof(string), typeof(string), typeof(string));
+            trvServicios = new TreeView(lsServicios);
+            trvServicios.HeadersVisible = true;
+
+            trvServicios.AppendColumn("ID", new CellRendererText(), "text", 0);
+            trvServicios.AppendColumn("Vehículo", new CellRendererText(), "text", 1);
+            trvServicios.AppendColumn("Repuesto", new CellRendererText(), "text", 2);
+            trvServicios.AppendColumn("Costo", new CellRendererText(), "text", 3);
+
+            sw.Add(trvServicios);
+
+            return box;
+        }
+
+        private Widget CreateFacturasPage()
+        {
+            Box box = new Box(Orientation.Vertical, 15);
+            box.Margin = 20;
+
+            // Título
+            Label lblTitulo = new Label();
+            lblTitulo.Markup = "<span font='18'>Facturación</span>";
+            lblTitulo.Halign = Align.Start;
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Lista de facturas
+            Label lblFacturas = new Label("Facturas generadas:");
+            box.PackStart(lblFacturas, false, false, 10);
+
+            ScrolledWindow sw = new ScrolledWindow();
+            sw.ShadowType = ShadowType.EtchedIn;
+            sw.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            box.PackStart(sw, true, true, 0);
+
+            lsFacturas = new ListStore(typeof(string), typeof(string), typeof(string));
+            trvFacturas = new TreeView(lsFacturas);
+            trvFacturas.HeadersVisible = true;
+
+            trvFacturas.AppendColumn("ID", new CellRendererText(), "text", 0);
+            trvFacturas.AppendColumn("ID Orden", new CellRendererText(), "text", 1);
+            trvFacturas.AppendColumn("Total", new CellRendererText(), "text", 2);
+
+            sw.Add(trvFacturas);
+
+            // Botón para cancelar factura
+            btnCancelarFactura = new Button("Cancelar Factura");
+            btnCancelarFactura.StyleContext.AddClass("destructive-action");
+            btnCancelarFactura.Clicked += CancelarFactura_Clicked;
+            btnCancelarFactura.Halign = Align.Center;
+            box.PackStart(btnCancelarFactura, false, false, 10);
+
+            return box;
+        }
+
+        private Widget CreateReportesPage()
+        {
+            Box box = new Box(Orientation.Vertical, 15);
+            box.Margin = 20;
+
+            // Título
+            Label lblTitulo = new Label();
+            lblTitulo.Markup = "<span font='18'>Reportes y Gráficos</span>";
+            lblTitulo.Halign = Align.Start;
+            box.PackStart(lblTitulo, false, false, 0);
+
+            // Selector de tipo de reporte
+            Label lblTipoReporte = new Label("Seleccione el tipo de reporte:");
+            box.PackStart(lblTipoReporte, false, false, 10);
+
+            cmbTipoReporte = new ComboBoxText();
+            cmbTipoReporte.AppendText("Usuarios");
+            cmbTipoReporte.AppendText("Vehículos");
+            cmbTipoReporte.AppendText("Repuestos");
+            cmbTipoReporte.AppendText("Servicios");
+            cmbTipoReporte.AppendText("Facturación");
+            cmbTipoReporte.AppendText("Bitácora");
+            cmbTipoReporte.AppendText("Top 5 vehículos con más servicios");
+            cmbTipoReporte.AppendText("Top 5 vehículos más antiguos");
+            cmbTipoReporte.Active = 0;
+            box.PackStart(cmbTipoReporte, false, false, 0);
+
+            // Botón generar reporte
+            btnGenerarReporte = new Button("Generar Reporte");
+            btnGenerarReporte.StyleContext.AddClass("suggested-action");
+            btnGenerarReporte.Clicked += GenerarReporte_Clicked;
+            box.PackStart(btnGenerarReporte, false, false, 20);
+
+            // Area para mostrar el reporte
+            Frame frameReporte = new Frame("Reporte generado");
+            box.PackStart(frameReporte, true, true, 0);
+
+            ScrolledWindow sw = new ScrolledWindow();
+            sw.ShadowType = ShadowType.EtchedIn;
+            sw.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            frameReporte.Add(sw);
+
+            imgReporte = new Image();
+            sw.Add(imgReporte);
+
+            return box;
+        }
+
+        #endregion
+
+        #region Funciones Auxiliares
+
+        private Frame CreateStatCard(string title, string value, string icon)
+        {
+            Frame card = new Frame();
+            card.WidthRequest = 150;
+
+            Box box = new Box(Orientation.Vertical, 10);
+            box.Margin = 15;
+            card.Add(box);
+
+            Image img = new Image(icon);
+            box.PackStart(img, false, false, 0);
+
+            Label lblTitle = new Label(title);
+            lblTitle.Halign = Align.Start;
+            box.PackStart(lblTitle, false, false, 0);
+
+            Label lblValue = new Label($"<span font='24'>{value}</span>");
+            lblValue.UseMarkup = true;
+            box.PackStart(lblValue, false, false, 0);
+
+            return card;
+        }
+
+        private Button CreateActionButton(string label, string icon)
+        {
+            Button btn = new Button();
+            btn.WidthRequest = 150;
+            btn.HeightRequest = 50;
+
+            Box box = new Box(Orientation.Horizontal, 5);
+            btn.Add(box);
+
+            Image img = new Image(icon);
+            img.WidthRequest = 24;
+            box.PackStart(img, false, false, 0);
+
+            Label lbl = new Label(label);
+            box.PackStart(lbl, true, true, 0);
+
+            return btn;
+        }
+
+        private void CargarDatosUsuarios()
+        {
+            lsUsuarios.Clear();
+            foreach (User usuario in userList.GetUsers())
+            {
+                lsUsuarios.AppendValues([
+                    usuario.ID.ToString(),
+                    new string(usuario.Nombres),
+                    new string(usuario.Apellidos),
+                    new string(usuario.Correo),
+                    new string(usuario.Contrasenia)
+                ]);
+            }
+        }
+
+        private void CargarUsuariosComboBox()
+        {
+            cmbUsuarioVehiculo.RemoveAll();
+            foreach (User usuario in userList.GetUsers())
+            {
+                string nombres = new string(usuario.Nombres);   // Convertir char* a string
+                string apellidos = new string(usuario.Apellidos);
+                cmbUsuarioVehiculo.AppendText($"{usuario.ID} - {nombres} {apellidos}");
+            }
+        }
+
+        private void CargarVehiculosComboBox()
+        {
+            cmbVehiculoServicio.RemoveAll();
+            foreach (Vehicle vehiculo in vehicleList.GetVehicles())
+            {
+
+                string marca = new(vehiculo.Marca);   // Convertir char* a string
+                string modelo = new(vehiculo.Modelo);
+                string placa = new(vehiculo.Placa);
+
+                cmbVehiculoServicio.AppendText($"{vehiculo.ID} - {placa} ({marca} {modelo})");
+            }
+        }
+
+        private void CargarRepuestosComboBox()
+        {
+            cmbRepuestoServicio.RemoveAll();
+            foreach (SparePart repuesto in sparePartsList.GetSpareParts())
+            {
+                string nombre = new(repuesto.Repuesto);
+                cmbRepuestoServicio.AppendText($"{repuesto.ID} - {nombre}");
+            }
+        }
+
+        private void CargarServiciosPendientes()
+        {
+            lsServicios.Clear();
+
+            foreach (Service servicio in serviceQueue.GetAllServices())
+            {
+                Vehicle* vehiculo = vehicleList.Search(servicio.Id_Vehiculo);
+                SparePart* repuesto = sparePartsList.Search(servicio.Id_Repuesto);
+                if (vehiculo != null && repuesto != null)
+                {
+                    string placa = new(vehiculo->Placa);
+                    string nombre = new(repuesto->Repuesto);
+                    lsServicios.AppendValues([
+                        servicio.ID.ToString(),
+                        placa,
+                        nombre,
+                        (servicio.Costo + repuesto->Costo).ToString("C")
+                    ]);
+                }
+            }
+        }
+
+        private void MostrarMensaje(string mensaje, MessageType tipo)
+        {
+            MessageDialog dialog = new MessageDialog(this, DialogFlags.Modal, tipo, ButtonsType.Ok, mensaje);
+            dialog.Response += (sender, args) => dialog.Destroy();
+            dialog.Show();
+        }
+
+        #endregion
+
+        #region Callbacks
+
+        private void SeleccionarArchivo_Clicked(object sender, EventArgs e)
+        {
+            FileChooserDialog dialog = new FileChooserDialog("Seleccionar archivo JSON", this,
+                FileChooserAction.Open,
+                "Cancelar", ResponseType.Cancel,
+                "Seleccionar", ResponseType.Accept);
+
+            dialog.Response += (s, args) =>
+            {
+                if ((ResponseType)args.ResponseId == ResponseType.Accept)
+                {
+                    rutaArchivoSeleccionado = dialog.Filename;
+                    lblEstadoCarga.Text = $"Archivo seleccionado: {rutaArchivoSeleccionado}";
+
+                    string json = File.ReadAllText(rutaArchivoSeleccionado);
+                    txtVistaPrevia.Buffer.Text = json;
+                    btnCargarDatos.Sensitive = true;
+                }
+                dialog.Destroy();
+            };
+
+            dialog.Run();
+        }
+
+        private void CargarDatos_Clicked(object sender, EventArgs e)
+        {
+            string json = txtVistaPrevia.Buffer.Text;
+            try
+            {
+                switch (cmbTipoEntidad.ActiveText)
+                {
+                    case "Usuarios":
+                        JArray usuariosArray = JArray.Parse(json);
+                        foreach (JObject obj in usuariosArray)
+                        {
+                            int id = (int)obj["ID"];
+                            string nombres = (string)obj["Nombres"];
+                            string apellidos = (string)obj["Apellidos"];
+                            string correo = (string)obj["Correo"];
+                            string contrasenia = (string)obj["Contrasenia"];
+
+                            if (userList.Search(id) == null)
+                            {
+                                User* usuario = (User*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(User));
+                                *usuario = new User(id, nombres, apellidos, correo, contrasenia);
+                                userList.Insert(usuario);
+                                lsUsuarios.AppendValues(usuario->ID, nombres, apellidos, correo, contrasenia);
+                            }
+                        }
+                        MostrarMensaje("Usuarios cargados exitosamente", MessageType.Info);
+                        break;
+
+                    case "Vehículos":
+                        JArray vehiculosArray = JArray.Parse(json);
+                        foreach (JObject obj in vehiculosArray)
+                        {
+                            int id = (int)obj["ID"];
+                            int id_user = (int)obj["Anio"];
+                            string marca = (string)obj["Marca"];
+                            string modelo = (string)obj["Modelo"];
+                            string placa = (string)obj["Color"];
+
+                            if (vehicleList.Search(id) == null)
+                            {
+                                Vehicle* vehiculo = (Vehicle*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(Vehicle));
+                                *vehiculo = new Vehicle(id, id_user, marca, modelo, placa);
+                                vehicleList.Insert(vehiculo);
+                                // Actualizar ListView (si aplica)
+                            }
+                        }
+                        MostrarMensaje("Vehículos cargados exitosamente", MessageType.Info);
+                        break;
+
+                    case "Repuestos":
+                        JArray repuestosArray = JArray.Parse(json);
+                        foreach (JObject obj in repuestosArray)
+                        {
+                            int id = (int)obj["ID"];
+                            string nombre = (string)obj["Nombre"];
+                            string categoria = (string)obj["Categoria"];
+                            decimal precio = (decimal)obj["Precio"];
+
+                            if (sparePartsList.Search(id) == null)
+                            {
+                                SparePart* repuesto = (SparePart*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(SparePart));
+                                *repuesto = new SparePart(id, nombre, categoria, (double)precio);
+                                sparePartsList.Insert(repuesto);
+                                // Actualizar ListView (si aplica)
+                            }
+                        }
+                        MostrarMensaje("Repuestos cargados exitosamente", MessageType.Info);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                MostrarMensaje("Error al cargar datos: " + ex.Message, MessageType.Error);
+            }
+        }
+
+        private void BuscarUsuario_Clicked(object sender, EventArgs e)
+        {
+            int idUsuario = -1;
+            if (int.TryParse(txtBuscarUsuarioId.Text, out idUsuario))
+            {
+                User* usuario = userList.Search(idUsuario);
+                if (usuario != null)
+                {
+                    txtNombres.Text = new string(usuario->Nombres);
+                    txtApellidos.Text = new string(usuario->Apellidos);
+                    txtCorreo.Text = new string(usuario->Correo);
+                    txtContrasenia.Text = new string(usuario->Contrasenia);
+                }
+                else
+                {
+                    MostrarMensaje("Usuario no encontrado", MessageType.Error);
+                }
+            }
+            else
+            {
+                MostrarMensaje("Por favor, ingrese un ID válido", MessageType.Error);
+            }
+        }
+
+        private void GuardarUsuario_Clicked(object sender, EventArgs e)
+        {
+            try
+            {
+                int id = siguienteIdUsuario++;
+                string nombres = txtNombres.Text;
+                string apellidos = txtApellidos.Text;
+                string correo = txtCorreo.Text;
+                string contrasenia = txtContrasenia.Text;
+
+                if (string.IsNullOrEmpty(nombres) || string.IsNullOrEmpty(apellidos) || string.IsNullOrEmpty(correo) || string.IsNullOrEmpty(contrasenia))
+                {
+                    MostrarMensaje("Todos los campos son obligatorios", MessageType.Error);
+                    return;
+                }
+
+                User* nuevoUsuario = (User*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(User));
+                *nuevoUsuario = new User(id, nombres, apellidos, correo, contrasenia);
+                userList.Insert(nuevoUsuario);
+
+                lsUsuarios.AppendValues(new object[] { id, nombres, apellidos, correo, contrasenia });
+                MostrarMensaje("Usuario registrado exitosamente", MessageType.Info);
+
+                LimpiarCamposUsuario();
+            }
+            catch (Exception ex)
+            {
+                MostrarMensaje("Error al registrar usuario: " + ex.Message, MessageType.Error);
+            }
+        }
+
+        private void EditarUsuario_Clicked(object sender, EventArgs e)
+        {
+            int idUsuario = -1;
+            if (int.TryParse(txtBuscarUsuarioId.Text, out idUsuario))
+            {
+                User* usuario = userList.Search(idUsuario);
+                if (usuario != null)
+                {
+                    string nombres = txtNombres.Text;
+                    string apellidos = txtApellidos.Text;
+                    string correo = txtCorreo.Text;
+                    string contrasenia = txtContrasenia.Text;
+
+                    if (string.IsNullOrEmpty(nombres) || string.IsNullOrEmpty(apellidos) || string.IsNullOrEmpty(correo) || string.IsNullOrEmpty(contrasenia))
+                    {
+                        MostrarMensaje("Todos los campos son obligatorios", MessageType.Error);
+                        return;
+                    }
+
+                    // Replace the User object with a new instance containing updated values
+                    *usuario = new User(usuario->ID, nombres, apellidos, correo, contrasenia);
+
+                    // Actualizar ListView
+                    lsUsuarios.Foreach((model, path, iter) =>
+                    {
+                        if ((int)model.GetValue(iter, 0) == idUsuario)
+                        {
+                            model.SetValue(iter, 1, nombres);
+                            model.SetValue(iter, 2, apellidos);
+                            model.SetValue(iter, 3, correo);
+                            model.SetValue(iter, 4, contrasenia);
+                        }
+                        return false;
+                    });
+
+                    MostrarMensaje("Usuario actualizado exitosamente", MessageType.Info);
+                }
+                else
+                {
+                    MostrarMensaje("Usuario no encontrado", MessageType.Error);
+                }
+            }
+            else
+            {
+                MostrarMensaje("Por favor, ingrese un ID válido", MessageType.Error);
+            }
+        }
+
+        private void EliminarUsuario_Clicked(object sender, EventArgs e)
+        {
+            int idUsuario = -1;
+            if (int.TryParse(txtBuscarUsuarioId.Text, out idUsuario))
+            {
+                User* usuario = userList.Search(idUsuario);
+                if (usuario != null)
+                {
+                    userList.Delete(usuario->ID);
+
+                    // Actualizar ListView
+                    TreeIter iter;
+                    if (lsUsuarios.GetIterFirst(out iter))
+                    {
+                        do
+                        {
+                            if ((int)lsUsuarios.GetValue(iter, 0) == idUsuario)
+                            {
+                                lsUsuarios.Remove(ref iter);
+                                break;
+                            }
+                        } while (lsUsuarios.IterNext(ref iter));
+                    }
+
+                    MostrarMensaje("Usuario eliminado exitosamente", MessageType.Info);
+                    LimpiarCamposUsuario();
+                }
+                else
+                {
+                    MostrarMensaje("Usuario no encontrado", MessageType.Error);
+                }
+            }
+            else
+            {
+                MostrarMensaje("Por favor, ingrese un ID válido", MessageType.Error);
+            }
+        }
+
+        private void GuardarVehiculo_Clicked(object sender, EventArgs e)
+        {
+            try
+            {
+                int idUsuario = -1;
+                if (cmbUsuarioVehiculo.ActiveText != null && int.TryParse(cmbUsuarioVehiculo.ActiveText.Split('-')[0].Trim(), out idUsuario))
+                {
+                    string marca = txtMarca.Text;
+                    string modelo = txtModelo.Text;
+                    string placa = txtPlaca.Text;
+
+                    if (string.IsNullOrEmpty(marca) || string.IsNullOrEmpty(modelo) || string.IsNullOrEmpty(placa))
+                    {
+                        MostrarMensaje("Todos los campos son obligatorios", MessageType.Error);
+                        return;
+                    }
+
+                    int id = siguienteIdVehiculo++;
+                    Vehicle* nuevoVehiculo = (Vehicle*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(Vehicle));
+                    *nuevoVehiculo = new Vehicle(id, idUsuario, marca, modelo, placa);
+                    vehicleList.Insert(nuevoVehiculo);
+
+                    // Actualizar ListView
+                    lsVehiculos.AppendValues(new object[] { id, cmbUsuarioVehiculo.ActiveText, marca, modelo, placa });
+                    MostrarMensaje("Vehículo registrado exitosamente", MessageType.Info);
+
+                    LimpiarCamposVehiculo();
+                }
+                else
+                {
+                    MostrarMensaje("Por favor, seleccione un propietario válido", MessageType.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MostrarMensaje("Error al registrar vehículo: " + ex.Message, MessageType.Error);
+            }
+        }
+
+        private void GenerarServicio_Clicked(object sender, EventArgs e)
+        {
+            int idVehiculo = -1;
+            if (cmbVehiculoServicio.ActiveText != null && int.TryParse(cmbVehiculoServicio.ActiveText.Split('-')[0].Trim(), out idVehiculo))
+            {
+                int idRepuesto = -1;
+                if (cmbRepuestoServicio.ActiveText != null && int.TryParse(cmbRepuestoServicio.ActiveText.Split('-')[0].Trim(), out idRepuesto))
+                {
+                    string detalles = txtDetallesServicio.Text;
+                    decimal costo = 0;
+                    if (decimal.TryParse(txtCostoServicio.Text, out costo))
+                    {
+                        Vehicle* vehiculo = vehicleList.Search(idVehiculo);
+                        SparePart* repuesto = sparePartsList.Search(idRepuesto);
+
+                        if (vehiculo != null && repuesto != null)
+                        {
+                            int idServicio = siguienteIdServicio++;
+                            Service* servicio = (Service*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(Service));
+                            *servicio = new Service(idServicio, idVehiculo, idRepuesto, detalles, (double)costo);
+
+                            serviceQueue.Enqueue(servicio);
+
+                            // Actualizar ListView
+                            lsServicios.AppendValues(new object[] { idServicio, new string(vehiculo->Placa), new string(repuesto->Repuesto), ((double)costo + repuesto->Costo).ToString("C") });
+
+                            MostrarMensaje("Servicio registrado exitosamente", MessageType.Info);
+
+                            // Generar factura automáticamente
+                            GenerarFactura(servicio, repuesto, (double)costo);
+                        }
+                        else
+                        {
+                            MostrarMensaje("Vehículo o repuesto no encontrados", MessageType.Error);
+                        }
+                    }
+                    else
+                    {
+                        MostrarMensaje("Por favor, ingrese un costo válido", MessageType.Error);
+                    }
+                }
+                else
+                {
+                    MostrarMensaje("Por favor, seleccione un repuesto válido", MessageType.Error);
+                }
+            }
+            else
+            {
+                MostrarMensaje("Por favor, seleccione un vehículo válido", MessageType.Error);
+            }
+        }
+
+        private void GenerarFactura(Service* servicio, SparePart* repuesto, double costoServicio)
+        {
+            int idFactura = siguienteIdFactura++;
+            Invoice* factura = (Invoice*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(Invoice));
+            *factura = new Invoice(idFactura, servicio->ID, costoServicio + repuesto->Costo);
+            invoiceStack.Push(factura);
+
+            // Actualizar ListView de facturas
+            lsFacturas.AppendValues(new object[] { idFactura, servicio->ID, (costoServicio + repuesto->Costo).ToString("C") });
+
+            // Insertar en matriz de bitácora
+            logMatrix.Insert(servicio->Id_Vehiculo, repuesto->ID, new string(servicio->Detalles));
+        }
+
+        private void CancelarFactura_Clicked(object sender, EventArgs e)
+        {
+            Invoice* factura = invoiceStack.Pop();
+            if (factura != null)
+            {
+                MostrarMensaje($"Factura #{factura->ID} cancelada con éxito", MessageType.Info);
+                // Actualizar ListView (quizás eliminando el último elemento)
+                if (lsFacturas.IterNChildren() > 0)
+                {
+                    TreeIter iter;
+                    if (lsFacturas.GetIterFirst(out iter))
+                    {
+                        // Move to the last row
+                        int lastIndex = lsFacturas.IterNChildren() - 1;
+                        for (int i = 0; i < lastIndex; i++)
+                        {
+                            if (!lsFacturas.IterNext(ref iter))
+                                break;
+                        }
+                        lsFacturas.Remove(ref iter);
+                    }
+                }
+            }
+            else
+            {
+                MostrarMensaje("No hay facturas pendientes", MessageType.Info);
+            }
+        }
+
+        private void GenerarReporte_Clicked(object sender, EventArgs e)
+        {
+            try
+            {
+                string tipoReporte = cmbTipoReporte.ActiveText;
+
+                string dotContent = null;
+                switch (tipoReporte)
+                {
+                    case "Usuarios":
+                        dotContent = userList.GenerateDot();
+                        break;
+                    case "Vehículos":
+                        dotContent = vehicleList.GenerateDot();
+                        break;
+                    case "Repuestos":
+                        dotContent = sparePartsList.GenerateDot();
+                        break;
+                    case "Servicios":
+                        dotContent = serviceQueue.GenerateDot();
+                        break;
+                    case "Facturación":
+                        dotContent = invoiceStack.GenerateDot();
+                        break;
+                    case "Bitácora":
+                        //dotContent = logMatrix.GenerateDot();
+                        break;
+                    case "Top 5 vehículos con más servicios":
+                        dotContent = serviceQueue.GenerateDot();
+                        break;
+                    case "Top 5 vehículos más antiguos":
+                        dotContent = serviceQueue.GenerateDot();
+                        break;
+                }
+
+                if (dotContent != null)
+                {
+                    // Guardar el archivo DOT
+                    string dotFilePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "report.dot");
+                    string outputPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "report.png");
+                    File.WriteAllText(dotFilePath, dotContent);
+
+                    // Generar imagen con Graphviz
+                    ProcessStartInfo startInfo = new ProcessStartInfo("dot", $"-Tpng {dotFilePath} -o {outputPath}");
+                    startInfo.RedirectStandardOutput = true;
+                    startInfo.UseShellExecute = false;
+                    startInfo.CreateNoWindow = true;
+
+                    using (Process process = Process.Start(startInfo))
+                    {
+                        process.WaitForExit();
+                        imgReporte.Pixbuf = new Gdk.Pixbuf(outputPath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MostrarMensaje("Error al generar reporte: " + ex.Message, MessageType.Error);
+            }
+        }
+
+        private void LimpiarCamposUsuario()
+        {
+            txtBuscarUsuarioId.Text = string.Empty;
+            txtNombres.Text = string.Empty;
+            txtApellidos.Text = string.Empty;
+            txtCorreo.Text = string.Empty;
+            txtContrasenia.Text = string.Empty;
+        }
+
+        private void LimpiarCamposVehiculo()
+        {
+            cmbUsuarioVehiculo.Active = -1;
+            txtMarca.Text = string.Empty;
+            txtModelo.Text = string.Empty;
+            txtPlaca.Text = string.Empty;
+        }
+
+        #endregion
+    }
+}
