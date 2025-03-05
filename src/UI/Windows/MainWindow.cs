@@ -134,10 +134,12 @@ namespace AutoGestPro.src.UI.Windows
             mainStack.AddTitled(bulkLoadView, "bulkload", "Bulk Data Load");
 
             userManagementView = new UserManagementView(userService);
+            userManagementView.ShowMessage += DisplayMessage;
             userService.DataChanged += (sender, e) => userManagementView.RefreshData();
             mainStack.AddTitled(userManagementView, "usermanagement", "User Management");
 
             vehicleManagementView = new VehicleManagementView(vehicleService, userService);
+            vehicleManagementView.ShowMessage += DisplayMessage;
             vehicleService.DataChanged += (sender, e) =>
             {
                 vehicleManagementView.RefreshData();
@@ -146,6 +148,7 @@ namespace AutoGestPro.src.UI.Windows
             mainStack.AddTitled(vehicleManagementView, "vehiclemanagement", "Vehicle Management");
 
             sparePartsManagementView = new SparePartsManagementView(sparePartsService);
+            sparePartsManagementView.ShowMessage += DisplayMessage;
             sparePartsService.DataChanged += (sender, e) =>
             {
                 sparePartsManagementView.RefreshData();
@@ -154,10 +157,12 @@ namespace AutoGestPro.src.UI.Windows
             mainStack.AddTitled(sparePartsManagementView, "sparepartsmanagement", "Spare Parts Management");
 
             serviceManagementView = new ServiceManagementView(serviceQueueService, vehicleService, sparePartsService, invoiceService, logMatrix);
+            serviceManagementView.ShowMessage += DisplayMessage;
             serviceQueueService.DataChanged += (sender, e) => serviceManagementView.RefreshData();
             mainStack.AddTitled(serviceManagementView, "servicemanagement", "Service Management");
 
             invoiceManagementView = new InvoiceManagementView(invoiceService, serviceQueueService, vehicleService);
+            invoiceManagementView.ShowMessage += DisplayMessage;
             invoiceService.DataChanged += (sender, e) =>
             {
                 Console.WriteLine("MainWindow: Invoice data changed, refreshing view");
@@ -177,6 +182,7 @@ namespace AutoGestPro.src.UI.Windows
                 };
 
             reportsView = new ReportsView(userList, vehicleList, sparePartsList, serviceQueue, invoiceStack, logMatrix);
+            reportsView.ShowMessage += DisplayMessage;
             mainStack.AddTitled(reportsView, "reports", "Reports and Charts");
         }
 
